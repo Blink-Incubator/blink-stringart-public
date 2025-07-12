@@ -59,11 +59,11 @@ from google.cloud import secretmanager
 from stringart_public import generate_string_art
 
 # --- Helper function to get the secret ---
-def get_shopify_secret():
-    client = secretmanager.SecretManagerServiceClient()
-    name = "projects/211687143240/secrets/shopify-api-password/versions/latest"
-    response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
+# def get_shopify_secret():
+#     client = secretmanager.SecretManagerServiceClient()
+#     name = "projects/211687143240/secrets/shopify-api-password/versions/latest"
+#     response = client.access_secret_version(request={"name": name})
+#     return response.payload.data.decode("UTF-8")
 
 def process_image_request(request):
     if not request.is_json:
@@ -78,7 +78,6 @@ def process_image_request(request):
             print("Could not find Order ID in payload.")
             return "Error: Missing Order ID.", 400
 
-        # --- Try to find the image URL ---
         image_url = None
         if 'line_items' in order_data and len(order_data['line_items']) > 0:
             properties = order_data['line_items'][0].get('properties', [])
@@ -87,7 +86,6 @@ def process_image_request(request):
                     image_url = prop.get('value')
                     break
         
-        # --- Process image if URL is found, otherwise create a placeholder result ---
         if image_url:
             print(f"Found image URL: {image_url}")
             response = requests.get(image_url, stream=True)
@@ -111,15 +109,17 @@ def process_image_request(request):
                 ]
             }
 
-        # --- Connect to Shopify API ---
-        api_password = get_shopify_secret()
+        # --- Connect to Shopify API using an Environment Variable ---
+        api_password = os.environ.get('SHOPIFY_API_PASSWORD')
+        if not api_password:
+            raise ValueError("SHOPIFY_API_PASSWORD environment variable not set")
+            
         shop_url = "ra2es3-rt.myshopify.com" 
         api_version = '2025-07' 
         
         session = shopify.Session(shop_url, api_version, api_password)
         shopify.ShopifyResource.activate_session(session)
 
-        # --- Add Note to the Order ---
         order = shopify.Order.find(order_id)
         note_content = f"String Art Coordinates: {results['versions'][0]['coordinates']}"
         order.add_note(note_content)
