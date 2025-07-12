@@ -46,24 +46,66 @@
 #     # --- 5. Return JSON response ---
 #     return jsonify(results)
 
-# Conver to logger
+# TEST
 # main.py
 import json
+import os
+import requests
 from flask import request
+
+from stringart_public import generate_string_art
 
 def process_image_request(request):
     """
-    Temporarily acts as a logger to capture the webhook data from Shopify.
+    Final function to process Shopify order webhooks.
     """
-    # Check if the request has JSON data
-    if request.is_json:
-        webhook_data = request.get_json()
-        
-        # Print the entire data structure to the logs
-        print("--- Received Shopify Webhook Data ---")
-        print(json.dumps(webhook_data, indent=2))
-        print("------------------------------------")
+    if not request.is_json:
+        return "Error: Request must be JSON.", 400
 
-        return "Webhook data received and logged.", 200
-    
-    return "No JSON data received.", 400
+    order_data = request.get_json()
+    print("Received new order webhook.")
+
+    try:
+        # Navigate through the JSON to find the properties
+        line_item = order_data['line_items'][0]
+        properties = line_item.get('properties', [])
+
+        image_url = None
+        for prop in properties:
+            if prop.get('name') == 'Custom Image URL':
+                image_url = prop.get('value')
+                break
+
+        if not image_url:
+            print("Error: 'Custom Image URL' property not found in line item.")
+            return "Error: Image URL not found.", 400
+
+        print(f"Found image URL: {image_url}")
+
+        # Download the image from the URL
+        response = requests.get(image_url, stream=True)
+        response.raise_for_status()  # Raise an exception for bad status codes
+
+        # Save the downloaded image to the temporary directory
+        filename = image_url.split('/')[-1]
+        temp_path = os.path.join('/tmp', filename)
+        with open(temp_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        print(f"Image downloaded and saved to {temp_path}")
+
+        # Call your string art engine
+        results = generate_string_art(temp_path)
+        print("String art generated successfully.")
+
+        # Optional: Clean up the downloaded file
+        os.remove(temp_path)
+
+        # We don't need to return the JSON, just a success message
+        # In a real app, you would now email the results or update the Shopify order.
+        return "Successfully processed string art.", 200
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return "An internal error occurred.", 500
