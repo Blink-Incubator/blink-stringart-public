@@ -61,7 +61,7 @@ from stringart_public import generate_string_art
 # --- Helper function to get the secret ---
 def get_shopify_secret():
     client = secretmanager.SecretManagerServiceClient()
-    name = "projects/studiosarte/secrets/shopify-api-password"
+    name = "projects/211687143240/secrets/shopify-api-password/versions/latest"
     response = client.access_secret_version(request={"name": name})
     return response.payload.data.decode("UTF-8")
 
