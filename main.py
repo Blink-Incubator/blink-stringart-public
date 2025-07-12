@@ -120,14 +120,23 @@ def process_image_request(request):
         session = shopify.Session(shop_url, api_version, api_password)
         shopify.ShopifyResource.activate_session(session)
 
+        # --- This is the corrected section ---
         order = shopify.Order.find(order_id)
         note_content = f"String Art Coordinates: {results['versions'][0]['coordinates']}"
-        order.add_note(note_content)
+        
+        # 1. Get any existing notes
+        existing_note = order.note or ""
+        # 2. Append the new note
+        order.note = existing_note + "\n\n" + note_content.strip()
+        # 3. Save the entire order object
+        order.save()
+        
         print(f"Successfully added note to Order #{order.order_number}")
 
         shopify.ShopifyResource.clear_session()
         return "Successfully processed request.", 200
 
     except Exception as e:
+        # This will print the actual, detailed error message if something fails
         print(f"An error occurred: {e}")
         return "An internal error occurred.", 500
