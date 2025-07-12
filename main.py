@@ -51,60 +51,82 @@
 import json
 import os
 import requests
+import shopify
 from flask import request
+from google.cloud import secretmanager
 
+# Import your existing function
 from stringart_public import generate_string_art
 
+# --- Helper function to get the secret ---
+def get_shopify_secret():
+    client = secretmanager.SecretManagerServiceClient()
+    name = "projects/studiosarte/secrets/shopify-api-password/versions/latest"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data.decode("UTF-8")
+
 def process_image_request(request):
-    """
-    Final function to process Shopify order webhooks.
-    """
     if not request.is_json:
         return "Error: Request must be JSON.", 400
 
     order_data = request.get_json()
-    print("Received new order webhook.")
+    print("Received webhook.")
 
     try:
-        # Navigate through the JSON to find the properties
-        line_item = order_data['line_items'][0]
-        properties = line_item.get('properties', [])
+        order_id = order_data.get('id')
+        if not order_id:
+            print("Could not find Order ID in payload.")
+            return "Error: Missing Order ID.", 400
 
+        # --- Try to find the image URL ---
         image_url = None
-        for prop in properties:
-            if prop.get('name') == 'Custom Image URL':
-                image_url = prop.get('value')
-                break
-
-        if not image_url:
-            print("Error: 'Custom Image URL' property not found in line item.")
-            return "Error: Image URL not found.", 400
-
-        print(f"Found image URL: {image_url}")
-
-        # Download the image from the URL
-        response = requests.get(image_url, stream=True)
-        response.raise_for_status()  # Raise an exception for bad status codes
-
-        # Save the downloaded image to the temporary directory
-        filename = image_url.split('/')[-1]
-        temp_path = os.path.join('/tmp', filename)
-        with open(temp_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+        if 'line_items' in order_data and len(order_data['line_items']) > 0:
+            properties = order_data['line_items'][0].get('properties', [])
+            for prop in properties:
+                if prop.get('name') == 'Custom Image URL':
+                    image_url = prop.get('value')
+                    break
         
-        print(f"Image downloaded and saved to {temp_path}")
+        # --- Process image if URL is found, otherwise create a placeholder result ---
+        if image_url:
+            print(f"Found image URL: {image_url}")
+            response = requests.get(image_url, stream=True)
+            response.raise_for_status()
+            
+            filename = "downloaded_image.jpg"
+            temp_path = os.path.join('/tmp', filename)
+            with open(temp_path, 'wb') as f: f.write(response.content)
+            
+            results = generate_string_art(temp_path)
+            os.remove(temp_path)
+            print("String art generated successfully.")
+        else:
+            print("No image URL found. Generating placeholder note for test webhook.")
+            results = {
+                "versions": [
+                    {
+                        "coordinates": ["No image URL provided in order data (This is expected for test notifications)."],
+                        "preview_b64": "N/A"
+                    }
+                ]
+            }
 
-        # Call your string art engine
-        results = generate_string_art(temp_path)
-        print("String art generated successfully.")
+        # --- Connect to Shopify API ---
+        api_password = get_shopify_secret()
+        shop_url = "ra2es3-rt.myshopify.com" 
+        api_version = '2025-07' 
+        
+        session = shopify.Session(shop_url, api_version, api_password)
+        shopify.ShopifyResource.activate_session(session)
 
-        # Optional: Clean up the downloaded file
-        os.remove(temp_path)
+        # --- Add Note to the Order ---
+        order = shopify.Order.find(order_id)
+        note_content = f"String Art Coordinates: {results['versions'][0]['coordinates']}"
+        order.add_note(note_content)
+        print(f"Successfully added note to Order #{order.order_number}")
 
-        # We don't need to return the JSON, just a success message
-        # In a real app, you would now email the results or update the Shopify order.
-        return "Successfully processed string art.", 200
+        shopify.ShopifyResource.clear_session()
+        return "Successfully processed request.", 200
 
     except Exception as e:
         print(f"An error occurred: {e}")
